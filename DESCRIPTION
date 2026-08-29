@@ -1,9 +1,17 @@
 Package: DMIX
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
-Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
+Title: Bayesian mixture models for length density data.
+Version: whatever it was
+Authors@R:
+    c(person("Simon", "Wotherspoon", , "Simon.Wotherspoon@aad.gov.au", role = c("aut", "cre"),
+             comment = c(ORCID = "0000-0002-6947-4445")),
+      person("Dylan", "Wotherspoon", , "dylan.wotherspoon.au@gmail.com", role = c("aut")))
+Description: Fit Bayesian models for length density data with JAGS.
+Imports:
+    rjags,
+    coda
+Suggests:
+    knitr,
+    rmarkdown
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
