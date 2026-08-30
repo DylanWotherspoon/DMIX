@@ -1,6 +1,6 @@
 Package: DMIX
 Title: Bayesian mixture models for length density data.
-Version: whatever it was
+Version: 0.0.0.9000
 Authors@R:
     c(person("Simon", "Wotherspoon", , "Simon.Wotherspoon@aad.gov.au", role = c("aut", "cre"),
              comment = c(ORCID = "0000-0002-6947-4445")),
@@ -15,6 +15,6 @@ Suggests:
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
 URL: https://github.com/DylanWotherspoon/DMIX
 BugReports: https://github.com/DylanWotherspoon/DMIX/issues
+Config/roxygen2/version: 8.1.0
