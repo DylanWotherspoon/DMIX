@@ -4,7 +4,7 @@
 ##' manner, and labels may switch from draw to draw.  This function
 ##' relabels the components with each draw so that they are ordered in
 ##' order of their mean.
-##' 
+##'
 ##' @title Component Relabelling
 ##' @param s a list of `mcarray` objects returned by [JAGSsample()]
 ##' @return a list of `mcarray` objects.
@@ -53,8 +53,8 @@ relabelComponents <- function(s) {
 ##' sorted so that the non-zero densities are the first `NPos`
 ##' elements.
 ##'
-##' @title Generate data for JAGS 
-##' @param Y a matrix of length bin densities. 
+##' @title Generate data for JAGS
+##' @param Y a matrix of length bin densities.
 ##' @param breaks the length bin boundaries.
 ##' @param Ncomp the number of mixture components
 ##' @return a list with elements
@@ -85,7 +85,79 @@ jagsData <- function(Y,breaks,Ncomp) {
 ## ----
 
 
+jagsPriors <- function(Ncomp,prior) {
 
+  generate <- function(f) {
+
+
+
+    ## Extract components
+    var <- as.character(f[[2]])
+    rhs <- f[[3]]
+    dist <- as.character(rhs[[1]])
+
+    ## Create parameter list
+    rhs[[1]] <- as.name("list")
+    pars <- eval(rhs, envir = environment(f))
+    pars <- lapply(pars, function(x) format(rep_len(x,Ncomp), trim=TRUE))
+
+    ## Generate JAGS statements
+    fmt <- paste0("  %s[%d] ~ %s(", paste(rep_len("%s",length(pars)),collapse =","), ")")
+    paste0("\n  ## Prior for ",var,"\n",
+           paste(do.call(sprintf,c(list(fmt, var, seq_len(Ncomp), dist), pars)),
+                 collapse="\n"))
+  }
+
+  list(
+    par = sapply(prior, function(f){
+      if(length(f) != 3 || as.character(f[[1]])!="~") stop("Invalid prior:",f)
+      as.character(f[[2]])
+    }),
+    code = paste(lapply(prior,generate),collapse="\n")
+  )
+}
+
+normalMixture <- function(Ncomp,prior,
+                            sigma = c("ind","cv","lin")){
+  sigma <- match.arg(sigma)
+  pr <- jagsPriors(Ncomp, prior)
+
+  code <- "
+  tau <- 1/sigma^2
+
+  for(j in 1:NBin) {
+
+    ## Mixture components
+    for(k in 1:NComp) {
+      components[j,k] <- w[k]*(pnorm(upr[j],mu[k],tau[k])-pnorm(lwr[j],mu[k],tau[k]))
+    }
+    lambda[j] <- sum(components[j,])
+  }
+"
+
+  switch(sigma,
+
+         ## sigma is independent of mu
+         ind={
+           par <- c("w","mu","sigma")
+         },
+         ## sigma is independent of mu
+         cv={
+           par <- c("w","mu","sigma","kappa")
+           code <- paste("
+  sigma <- kappa*mu", code, sep="\n")
+         },
+         ## sigma is independent of mu
+         lin={
+           par <- c("w","mu","sigma","a","b")
+           code <- paste("
+  sigma <- (a+b)*mu", code, sep="\n")
+         }
+         )
+  code <- paste(code, pr$code, sep="\n")
+
+  list(par=par, code=code)
+}
 
 ##' Generate JAGS code for delta log Normal bin densities.
 ##'
@@ -99,7 +171,7 @@ jagsData <- function(Y,breaks,Ncomp) {
 ##' * `fixed` - p and s vary across bins
 ##' * `random` - log p and logit s across bins are modelled as Normal
 ##'   random effects
-##' 
+##'
 ##' @title DLN Response JAGS code
 ##' @param DLN the model for the p and s parameters
 ##' @return a list with two components
@@ -112,8 +184,8 @@ DLNResponse <- function(DLN = c("const","fixed","random")) {
 
   DLN <- match.arg(DLN)
   switch(DLN,
-         
-         ## p and s are constant across bins       
+
+         ## p and s are constant across bins
          const={
            par <- c("p","s")
            code <- "
@@ -136,7 +208,7 @@ DLNResponse <- function(DLN = c("const","fixed","random")) {
          },
 
 
-         ## p and s are constant across bins       
+         ## p and s are constant across bins
          fixed={
            par <- c("p","s")
            code <-"
@@ -170,7 +242,7 @@ DLNResponse <- function(DLN = c("const","fixed","random")) {
   for(j in 1:NBin) {
 
     ## Priors for nuisance parameters
-    logit(p[j]) ~ dnorm(p.mu,p.tau) 
+    logit(p[j]) ~ dnorm(p.mu,p.tau)
     log(s[j]) ~ dnorm(s.mu,s.tau)
     t[j] <- 1/s[j]^2
 
@@ -184,7 +256,7 @@ DLNResponse <- function(DLN = c("const","fixed","random")) {
     }
   }"
          })
-  
+
   list(par=par,code=code)
 
 }
@@ -206,34 +278,34 @@ DLNResponse <- function(DLN = c("const","fixed","random")) {
 ##' length bins are assumed contiguous and `breaks` must be and
 ##' ordered vector of bin boundaries of length one greater than the
 ##' number of bins.
-##' 
+##'
 ##' @title Delta LogNormal Mixture Model
-##' @param Y a matrix of length bin densities. 
+##' @param Y a matrix of length bin densities.
 ##' @param breaks the length bin boundaries.
 ##' @param Ncomp the number of mixture components
-##' @param lower lower bounds for model parameters
-##' @param upper upper bounds for model parameters
+##' @param prior a list of formula
 ##' @param sigma the model for sigma
 ##' @return a "BMIX" object with components
 ##' * `jags.par` - the parameters to sample
 ##' * `jags.model` - the JAGS script
 ##' * `jags.data` - the JAGS data
 ##' @export
-DLNMix <- function(Y,breaks,Ncomp,lower,upper,
+DLNMix <- function(Y,breaks,Ncomp,prior,
                    sigma = c("ind","cv","lin"),
                    DLN = c("const","fixed","random")) {
-                     
+
   ## Determine model for sigma and the delta log Normal
   sigma <- match.arg(sigma)
   DLN <- match.arg(DLN)
   cls <- paste0("BMIX",sigma)
-  
+
   ## Mixture model
-  mix <- normalMixture(Ncomp,lower,upper,sigma)
+  mix <- normalMixture(Ncomp,prior,sigma)
   ## Response model
   resp <- DLNResponse(DLN)
 
   model <- list(
+    call = match.call(),
     jags.par=c(mix$par,resp$par),
     jags.model=paste("model {", mix$code, resp$code,"}",sep="\n"),
     jags.data=jagsData(Ncomp,Y,breaks))
@@ -269,7 +341,7 @@ DLNMix <- function(Y,breaks,Ncomp,lower,upper,
 JAGSsample <- function(model,n.iter=5000,n.thin=1,n.chains=4,
                        n.adapt=1000,n.update=1000,
                        quiet=!interactive()) {
-  
+
   ## Ensure the glm module is loaded
   load.module("glm",quiet=quiet)
   pb <- if(quiet) "none" else getOption("jags.pb","text")
