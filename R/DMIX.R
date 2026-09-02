@@ -84,13 +84,29 @@ jagsData <- function(Y,breaks,Ncomp) {
 }
 ## ----
 
-
+##' Generate JAGS code for the model priors
+##'
+##' Translates a list of formula of the form `par ~ dist(a,b,...)` to
+##' JAGS code for the model priors.
+##'
+##' @title Prior JAGS code
+##' @param Ncomp the number of mixture components
+##' @param prior a list of formula specifying priors
+##' @return a list with components
+##' * `par` - the parameters for which priors are defined
+##' * `code` - JAGS code
+##' @export
+## ---- jagsPriors
 jagsPriors <- function(Ncomp,prior) {
 
-  generate <- function(f) {
+  ## Extract parameter name
+  getPar <- function(f) {
+    if(length(f) != 3 || as.character(f[[1]])!="~") stop("Invalid prior:",f)
+    as.character(f[[2]])
+  }
 
-
-
+  ## Generate JAGS code
+  genCode <- function(f) {
     ## Extract components
     var <- as.character(f[[2]])
     rhs <- f[[3]]
@@ -108,30 +124,48 @@ jagsPriors <- function(Ncomp,prior) {
                  collapse="\n"))
   }
 
-  list(
-    par = sapply(prior, function(f){
-      if(length(f) != 3 || as.character(f[[1]])!="~") stop("Invalid prior:",f)
-      as.character(f[[2]])
-    }),
-    code = paste(lapply(prior,generate),collapse="\n")
-  )
+  list(par=sapply(prior, getPar),
+       code=paste(lapply(prior,genCode),collapse="\n"))
 }
+## ----
 
+
+##' Generate JAGS code for a Normal mixture.
+##'
+##' Generate the JAGS code for the mixture of Normals and the model
+##' parameters.  Three variant models are provided for the standard
+##' deviations sigma of the components
+##'
+##' * `ind` - sigma is independent of mu, and priors must be provided
+##' for either `sigma` or the precision `tau`.
+##'
+##' * `cv` - sigma is proportional to mu, `sigma = kappa*mu` and a
+##' prior must be provided for coefficient of proportionality `kappa`
+##'
+##' * `lin` - sigma is a linear function of the mean, sigma = a +
+##' b*mu` and priors must be provided for `a` and `b`.
+##'
+##' @title Normal Mixture JAGS code
+##' @param Ncomp the number of mixture components
+##' @param prior a list of formula specifying priors
+##' @param sigma the model for sigma
+##' @return a list with components
+##' * `par` - the parameters to sample
+##' * `code` - JAGS code
+##' @export
+## ---- normalMixture
 normalMixture <- function(Ncomp,prior,
-                            sigma = c("ind","cv","lin")){
+                          sigma = c("ind","cv","lin")){
   sigma <- match.arg(sigma)
   pr <- jagsPriors(Ncomp, prior)
 
   code <- "
-  tau <- 1/sigma^2
-
   for(j in 1:NBin) {
-
     ## Mixture components
     for(k in 1:NComp) {
-      components[j,k] <- w[k]*(pnorm(upr[j],mu[k],tau[k])-pnorm(lwr[j],mu[k],tau[k]))
+      comp[j,k] <- w[k]*(pnorm(upr[j],mu[k],tau[k])-pnorm(lwr[j],mu[k],tau[k]))
     }
-    lambda[j] <- sum(components[j,])
+    lambda[j] <- sum(comp[j,])
   }
 "
 
@@ -140,24 +174,38 @@ normalMixture <- function(Ncomp,prior,
          ## sigma is independent of mu
          ind={
            par <- c("w","mu","sigma")
+           if("tau" %in% pr$par) {
+             mp <- setdiff(c("w","mu","tau"),pr$par)
+             if(length(mp)>0) stop("Missing priors: ",paste(mp,collapse=", "))
+             code <- paste("  sigma <- 1/sqrt(tau)",code,sep="\n")
+           } else {
+             mp <- setdiff(c("w","mu","sigma"),pr$par)
+             if(length(mp)>0) stop("Missing priors: ",paste(mp,collapse=", "))
+             code <- paste("  tau <- 1/sigma^2",code,sep="\n")
+           }
          },
-         ## sigma is independent of mu
+
+         ## sigma is proportional to mu
          cv={
            par <- c("w","mu","sigma","kappa")
-           code <- paste("
-  sigma <- kappa*mu", code, sep="\n")
+           mp <- setdiff(c("w","mu","kappa"),pr$par)
+           if(length(mp)>0) stop("Missing priors: ",paste(mp,collapse=", "))
+           code <- paste("  sigma <- kappa*mu\n  tau <- 1/sigma^2",code,sep="\n")
          },
-         ## sigma is independent of mu
+
+         ## sigma a linear function of mu
          lin={
            par <- c("w","mu","sigma","a","b")
-           code <- paste("
-  sigma <- (a+b)*mu", code, sep="\n")
-         }
-         )
-  code <- paste(code, pr$code, sep="\n")
+           mp <- setdiff(c("w","mu","a","b"),pr$par)
+           if(length(mp)>0) stop("Missing priors: ",paste(mp,collapse=", "))
+           code <- paste("  sigma <- a+b*mu\n  tau <- 1/sigma^2",code,sep="\n")
+         })
 
+  ## Add code for priors
+  code <- paste(code, pr$code, sep="\n")
   list(par=par, code=code)
 }
+## ----
 
 ##' Generate JAGS code for delta log Normal bin densities.
 ##'
@@ -175,11 +223,11 @@ normalMixture <- function(Ncomp,prior,
 ##' @title DLN Response JAGS code
 ##' @param DLN the model for the p and s parameters
 ##' @return a list with two components
-##' * `code` - JAGS code
 ##' * `par` - the parameters to sample
+##' * `code` - JAGS code
 ##' @export
 ## ---- DLNResponse
-DLNResponse <- function(DLN = c("const","fixed","random")) {
+DLNResponse <- function(DLN = c("fixed","const","random")) {
 
 
   DLN <- match.arg(DLN)
@@ -283,21 +331,23 @@ DLNResponse <- function(DLN = c("const","fixed","random")) {
 ##' @param Y a matrix of length bin densities.
 ##' @param breaks the length bin boundaries.
 ##' @param Ncomp the number of mixture components
-##' @param prior a list of formula
+##' @param prior a list of formula specifying priors
 ##' @param sigma the model for sigma
-##' @return a "BMIX" object with components
+##' @param DLN the model for the DLN parameters
+##' @return a "DMIX" object with components
 ##' * `jags.par` - the parameters to sample
 ##' * `jags.model` - the JAGS script
 ##' * `jags.data` - the JAGS data
 ##' @export
+## ---- DLNMix
 DLNMix <- function(Y,breaks,Ncomp,prior,
                    sigma = c("ind","cv","lin"),
-                   DLN = c("const","fixed","random")) {
+                   DLN = c("fixed","const","random")) {
 
   ## Determine model for sigma and the delta log Normal
   sigma <- match.arg(sigma)
   DLN <- match.arg(DLN)
-  cls <- paste0("BMIX",sigma)
+  cls <- paste0("DLNMIX",DLN,sigma)
 
   ## Mixture model
   mix <- normalMixture(Ncomp,prior,sigma)
@@ -308,10 +358,26 @@ DLNMix <- function(Y,breaks,Ncomp,prior,
     call = match.call(),
     jags.par=c(mix$par,resp$par),
     jags.model=paste("model {", mix$code, resp$code,"}",sep="\n"),
-    jags.data=jagsData(Ncomp,Y,breaks))
-  class(model) <- c(cls,"BMIX")
+    jags.data=jagsData(Y,breaks,Ncomp))
+  class(model) <- c(cls,"DMIX")
   model
 }
+## ----
+
+
+##' Print a DMIX object
+##'
+##' @title Print DMIX model objects
+##' @param x a `DMIX` model object.
+##' @param ... currently ignored.
+##' @keywords internal
+##' @export
+## ---- print.DMIX
+print.DMIX <- function(x,...) {
+  cat("\nCall:\n", paste(deparse(x$call), sep = "\n", collapse = "\n"), "\n\n", sep = "")
+  cat(x$jags.model,sep="\n")
+}
+## ----
 
 
 
