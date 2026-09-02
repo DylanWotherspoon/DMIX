@@ -1,5 +1,5 @@
 Package: DMIX
-Title: Bayesian mixture models for length density data.
+Title: Bayesian mixture models for length density data
 Version: 0.0.0.9000
 Authors@R:
     c(person("Simon", "Wotherspoon", , "Simon.Wotherspoon@aad.gov.au", role = c("aut", "cre"),
