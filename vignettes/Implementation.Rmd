@@ -1,0 +1,91 @@
+---
+title: "Implementation"
+output: rmarkdown::html_vignette
+bibliography: Ref.bib
+vignette: >
+  %\VignetteIndexEntry{Implementation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+```{r,echo=FALSE}
+knitr::read_chunk("../R/DMIX.R")
+```
+
+
+```{r setup}
+library(DMIX)
+```
+
+
+The `DMIX` package fits Normal mixtures to binned length density data from fish and plankton surveys.
+The models are similar to those proposed by [@DLM94CMIX], but are fitted by Bayesian sampling 
+techniques [@Plummer2003].
+
+
+## Delta Log Normal Densities
+
+Following [@Pennington83] the delta log Normal model assumes that the density in each length bin has
+a delta log Normal distribution.
+
+The observed density $x_{ki}$ in length bin $[l_{i}, l_{i+1})$ in sample $k$ is assume to be delta
+log Normal
+$$
+y_{ki} = 
+\begin{cases}
+0 & z_{ki} = 0\\
+x_{ki} & z_{ki} = 1
+\end{cases}
+$$
+where
+$$
+\begin{align}
+z_{ki} &\sim \operatorname{Bin}(1,p_{i})\\
+\log x_{ki} &\sim \operatorname{N}(m_{i},s_{i}^{2}) 
+\end{align}
+$$
+and $p_{i}$ is the probability of observing a non-zero density in length bin $i$, and $m_{i}$ and 
+$s_{i}^{2}$ are the mean and variance of the log of the non-zero observations in length bin $i$.  
+It follows that the mean density $\lambda_{i} = \operatorname{E}(y_{ki})$ in each bin is 
+$$
+\lambda_{i} = p_{i} \exp(m_{i} + s_{i}^{2}/2).
+$$
+In turn the mean density in each bin is assumed to be determined by a Normal mixture integrated over 
+the length bin
+$$
+\lambda_{i} = \sum_{k=1}^{m} w_{k} [\Phi(l_{i-1}; \mu_{k}, \sigma_{k}^2) -\Phi(l_{i}; \mu_{k}, \sigma_{k}^2)]
+$$
+where $w_{k}$ is the total density in component $k$, $\mu_{k}$ and $\sigma_{k}^{2}$ are the mean and 
+variance of component $k$, and  $\Phi(l; \mu, \sigma)$ is the distribution function of the Normal.
+
+The probability $p_{i}$ of a non-zero density and the dispersion $s_{i}$ across the bins are modelled 
+as either
+
+* as fixed effects with $p_{i}$ and $s_{i}$ estimated in each bin
+* constant across bins, $p_{i} = p$ and $s_{i}=s$ or
+* as independent Normal random effects
+$$
+\begin{align}
+\operatorname{logit} p_{i} &\sim \operatorname{N}(\mu_{p},\sigma_{p}^{2})\\
+\log s_{i} &\sim \operatorname{N}(\mu_{s},\sigma_{s}^{2})
+\end{align}
+$$
+
+
+Similarly, there are three alternative models for the standard deviation of the mixture components
+
+* the $\sigma_{k}$ are estimated independently for each component 
+* the $\sigma_{k} = \kappa \mu_{k}$ are assumed proportional to the $\mu_{k}$
+* the $\sigma_{k} = a + b \mu_{k}$ are assumed to be linearly related to the $\mu_{k}$.
+
+
+## Reference
+
