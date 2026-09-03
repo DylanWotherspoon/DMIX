@@ -14,7 +14,7 @@ relabelComponents <- function(s) {
   ## Apply a permutation to a mcarray
   applyPerm <- function(x,p) {
     ## If dimensions match
-    if(dim(x)==dim(p)) {
+    if(identical(dim(x),dim(p))) {
       att <- attributes(x)
       x <- x[p]
       attributes(x) <- att
@@ -27,6 +27,7 @@ relabelComponents <- function(s) {
   dim(mu) <- c(dim(mu)[1],prod(dim(mu)[-1]))
   perm <- array(seq_len(length(mu)),dim(mu))
   for(j in seq_len(ncol(mu))) perm[,j] <- perm[order(mu[,j]),j]
+  dim(perm) <- dim(s$mu)
 
   ## Permute components
   s$mu <- applyPerm(s$mu,perm)
@@ -35,7 +36,6 @@ relabelComponents <- function(s) {
   s
 }
 ## ----
-
 
 
 ##' Generate the data to pass to JAGS.
@@ -142,7 +142,7 @@ jagsPriors <- function(Ncomp,prior) {
 ##' * `cv` - sigma is proportional to mu, `sigma = kappa*mu` and a
 ##' prior must be provided for coefficient of proportionality `kappa`
 ##'
-##' * `lin` - sigma is a linear function of the mean, sigma = a +
+##' * `lin` - sigma is a linear function of the mean, `sigma = a +
 ##' b*mu` and priors must be provided for `a` and `b`.
 ##'
 ##' @title Normal Mixture JAGS code
@@ -216,9 +216,11 @@ normalMixture <- function(Ncomp,prior,
 ##' densities.  Three variant models are provided for the p and s parameters
 ##'
 ##' * `const` - p and s are constant across bins
+##'
 ##' * `fixed` - p and s vary across bins
+##'
 ##' * `random` - log p and logit s across bins are modelled as Normal
-##'   random effects
+##'   random effects.
 ##'
 ##' @title DLN Response JAGS code
 ##' @param DLN the model for the p and s parameters
@@ -265,6 +267,7 @@ DLNResponse <- function(DLN = c("fixed","const","random")) {
     ## Priors for nuisance parameters
     p[j] ~ dbeta(1,1)
     t[j] ~ dgamma(0.01,0.01)
+    s[j] <- 1/sqrt(t[j])
 
     ## Log Normal mean
     m[j] <- log(lambda[j]/p[j])-1/(2*t[j])
@@ -327,6 +330,32 @@ DLNResponse <- function(DLN = c("fixed","const","random")) {
 ##' ordered vector of bin boundaries of length one greater than the
 ##' number of bins.
 ##'
+##' The mean density in each bin are assumed to follow a Normal
+##' mixture model with `Ncomp` components.  Three variant models are
+##' provided for the standard deviations sigma of the components
+##'
+##' * `ind` - sigma is independent of mu, and priors must be provided
+##' for either `sigma` or the precision `tau`.
+##'
+##' * `cv` - sigma is proportional to mu, `sigma = kappa*mu` and a
+##' prior must be provided for coefficient of proportionality `kappa`
+##'
+##' * `lin` - sigma is a linear function of the mean, `sigma = a +
+##' b*mu` and priors must be provided for `a` and `b`.
+##'
+##' The densities in each bin are assumed delta log Normal distributed
+##' parameterized in term of parameters p - the probability of a
+##' non-zero response, and m and s - the mean and standard deviation
+##' of the log of the non-zero densities.  Three variant models are
+##' provided for the p and s parameters
+##'
+##' * `const` - p and s are constant across bins
+##'
+##' * `fixed` - p and s vary across bins
+##'
+##' * `random` - log p and logit s across bins are modelled as Normal
+##'   random effects.
+##'
 ##' @title Delta LogNormal Mixture Model
 ##' @param Y a matrix of length bin densities.
 ##' @param breaks the length bin boundaries.
@@ -334,7 +363,10 @@ DLNResponse <- function(DLN = c("fixed","const","random")) {
 ##' @param prior a list of formula specifying priors
 ##' @param sigma the model for sigma
 ##' @param DLN the model for the DLN parameters
-##' @return a "DMIX" object with components
+##' @return a `DMIX` object with components
+##' * `call` - the model call
+##' * `sigma` - the model for the sigma parameters
+##' * `DLN` - the model for the delta log Normal parameters
 ##' * `jags.par` - the parameters to sample
 ##' * `jags.model` - the JAGS script
 ##' * `jags.data` - the JAGS data
@@ -347,7 +379,6 @@ DLNMix <- function(Y,breaks,Ncomp,prior,
   ## Determine model for sigma and the delta log Normal
   sigma <- match.arg(sigma)
   DLN <- match.arg(DLN)
-  cls <- paste0("DLNMIX",DLN,sigma)
 
   ## Mixture model
   mix <- normalMixture(Ncomp,prior,sigma)
@@ -356,10 +387,12 @@ DLNMix <- function(Y,breaks,Ncomp,prior,
 
   model <- list(
     call = match.call(),
+    sigma=sigma,
+    DLN=DLN,
     jags.par=c(mix$par,resp$par),
     jags.model=paste("model {", mix$code, resp$code,"}",sep="\n"),
     jags.data=jagsData(Y,breaks,Ncomp))
-  class(model) <- c(cls,"DMIX")
+  class(model) <- c("DLNMIX","DMIX")
   model
 }
 ## ----
@@ -425,3 +458,44 @@ JAGSsample <- function(model,n.iter=5000,n.thin=1,n.chains=4,
   s
 }
 ## ----
+
+
+
+##' Convert a list of `mcarray` objects to one `mcmc.list` object.
+##'
+##' This function converts a list of `mcarray` objects to a single
+##' `mcmc.list` object.  Note that individual `mcarray` objects may be
+##' converted with `as.mcmc.list()`.  This function converts each
+##' `mcarray` object to an `mcmc.list` object and then merges these
+##' into a single `mcmc.list` object.
+##'
+##' @title Convert mcarray to mcmc.list
+##' @param s a list of `mcarray` objects.
+##' @return An `mcmc.list` object.
+##' @seealso [coda::as.mcmc.list()]
+##' @importFrom coda mcmc mcmc.list as.mcmc.list
+##' @export
+## ---- as.coda
+as.coda <- function(s,name=TRUE) {
+
+  ## Merge a list of mcmc.list objects
+  merge <- function(...) {
+    dots <- list(...)
+    ## Extract sampling parameters
+    start <- unique(sapply(dots,start))
+    end <- unique(sapply(dots,end))
+    thin <- unique(sapply(dots,thin))
+    if(length(start)!=1L || length(end)!=1L || length(thin)!=1L)
+      warning("All mcmc.list objects must have the same start, end and thin")
+    ## Combine mcmc.list objects
+    do.call(mcmc.list,
+            lapply(do.call(mapply,c(cbind,dots,SIMPLIFY=FALSE)),
+                   mcmc,start=start,end=end,thin=thin))
+  }
+
+
+  ## Convert each mcarray to an mcmc.list and merge them
+  do.call(merge,lapply(s,as.mcmc.list))
+}
+## ----
+
